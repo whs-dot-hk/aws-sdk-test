@@ -3,6 +3,10 @@ use aws_sdk_imagebuilder::model::{Filter, ImageRecipeSummary};
 use aws_sdk_imagebuilder::{Client, Error};
 use semver::Version;
 
+fn get_version(s: &ImageRecipeSummary) -> Version {
+    Version::parse(s.arn.as_ref().unwrap().split("/").last().unwrap()).unwrap()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let region_provider = RegionProviderChain::default_provider().or_else("us-east-1");
@@ -21,23 +25,24 @@ async fn main() -> Result<(), Error> {
                     .values("whslabs-cardano-node")
                     .build(),
             )
-            .max_results(3)
-            .set_next_token(next_token)
+            .set_next_token(next_token.take())
             .send()
             .await?;
-        //println!("{:?}", resp);
 
-        let mut summaries = resp.image_recipe_summary_list.unwrap().clone();
-        summaries.sort_by_key(|k| {
-            Version::parse(k.clone().arn.unwrap().split("/").last().unwrap()).unwrap()
-        });
+        let mut summary_list = resp.image_recipe_summary_list.unwrap();
+        summary_list.sort_by_key(|k| get_version(k));
 
-        let l = summaries.last().unwrap().clone();
+        let n = summary_list.last().unwrap().clone();
+
         if summary == None {
-            summary = Some(l);
+            summary = Some(n);
+            continue;
         }
-        else if Version::parse(l.clone().arn.unwrap().split("/").last().unwrap()).unwrap() > Version::parse(summary.clone().unwrap().arn.unwrap().split("/").last().unwrap()).unwrap() {
-            summary = Some(l);
+
+        let o = &summary.clone().unwrap();
+
+        if get_version(&n) > get_version(&o) {
+            summary = Some(n);
         }
 
         next_token = resp.next_token;
@@ -46,41 +51,26 @@ async fn main() -> Result<(), Error> {
         }
     }
 
-    println!("{:?}", summary);
-    //let mut summaries = resp.image_recipe_summary_list.unwrap().clone();
-    //summaries.sort_by(|b, a| a.clone().arn.unwrap().cmp(&b.clone().arn.unwrap()));
-    //println!("{:?}", summaries);
-    //println!("{:?}", Version::parse(&summaries.first().unwrap().clone().arn.unwrap()).unwrap());
-    //println!("{:?}", Version::parse(summaries.first().unwrap().clone().arn.unwrap().split("/").last().unwrap()));
+    let req = client
+        .get_image_recipe()
+        .set_image_recipe_arn(summary.unwrap().arn);
+    let resp = req.send().await?;
+    println!("{:?}", resp);
+    let r = resp.image_recipe.unwrap();
+    println!("{:?}", r);
 
-    //summaries.sort_by_key(|k| Version::parse(k.clone().arn.unwrap().split("/").last().unwrap()).unwrap());
-    //println!("{:?}", summaries);
+    let mut new_version = Version::parse(&r.version.unwrap()).unwrap();
+    new_version.patch += 1;
 
-    //let req = client.get_image_recipe().image_recipe_arn(
-    //    "arn:aws:imagebuilder:us-east-1:102933037533:image-recipe/whslabs-cardano-node/1.0.0",
-    //);
-    //let resp = req.send().await?;
-    //println!("{:?}", resp);
-    //let r = resp.image_recipe.unwrap();
-    //println!("{:?}", r);
+    let req = client
+        .create_image_recipe()
+        .set_name(r.name)
+        .semantic_version(new_version.to_string())
+        .components(r.components.unwrap().first().unwrap().clone())
+        .parent_image(r.parent_image.unwrap())
+        .block_device_mappings(r.block_device_mappings.unwrap().first().unwrap().clone());
 
-    //let req = client.get_image_recipe().image_recipe_arn(
-    //    "arn:aws:imagebuilder:us-east-1:102933037533:image-recipe/whslabs-cardano-node/1.0.0",
-    //);
-    //let resp = req.send().await?;
-    //println!("{:?}", resp);
-    //let r = resp.image_recipe.unwrap();
-    //println!("{:?}", r);
-
-    //let req = client
-    //    .create_image_recipe()
-    //    .name("whslabs-cardano-node")
-    //    .semantic_version("1.0.11")
-    //    .components(r.components.unwrap().first().unwrap().clone())
-    //    .parent_image(r.parent_image.unwrap())
-    //    .block_device_mappings(r.block_device_mappings.unwrap().first().unwrap().clone());
-    //
-    //let resp = req.send().await?;
-    //println!("{:?}", resp);
+    let resp = req.send().await?;
+    println!("{:?}", resp);
     Ok(())
 }
