@@ -32,17 +32,18 @@ async fn main() -> Result<(), Error> {
         let mut summary_list = resp.image_recipe_summary_list.unwrap();
         summary_list.sort_by_key(|k| get_version(k));
 
-        let n = summary_list.last().unwrap().clone();
+        let new = summary_list.last().unwrap().clone();
 
-        if summary == None {
-            summary = Some(n);
-            continue;
-        }
-
-        let o = &summary.clone().unwrap();
-
-        if get_version(&n) > get_version(&o) {
-            summary = Some(n);
+        match summary.clone() {
+            Some(old) => {
+                if get_version(&new) > get_version(&old) {
+                    summary = Some(new);
+                }
+            }
+            None => {
+                summary = Some(new);
+                continue;
+            }
         }
 
         next_token = resp.next_token;
